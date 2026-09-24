@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+gunicorn
+pydantic
+openai
+requests
+pillow
+moviepy
