@@ -10,6 +10,7 @@ import google.generativeai as genai
 import edge_tts
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
 
@@ -34,23 +35,26 @@ class PipelineRequest(BaseModel):
 def home():
     return {"status": "Free Automation Server is running"}
 
+@app.get("/download-video")
+def download_video():
+    """생성된 MP4 영상을 웹으로 전달하는 엔드포인트"""
+    video_path = "/tmp/output_shorts.mp4"
+    if os.path.exists(video_path):
+        return FileResponse(video_path, media_type="video/mp4", filename="toss_shorts.mp4")
+    raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
+
 def create_local_image(output_path: str):
-    """메모리 절약을 위한 720x720 규격 썸네일 생성"""
-    img = Image.new('RGB', (720, 720), color=(49, 130, 246))  # 토스 블루 (#3182F6)
+    img = Image.new('RGB', (720, 720), color=(49, 130, 246))
     img.save(output_path)
 
 def make_video_sync(audio_path: str, img_path: str, output_path: str):
-    """Render 무료 메모리(512MB) 초과 방지 최적화 렌더링"""
     audio_clip = AudioFileClip(audio_path)
     duration = audio_clip.duration
 
-    # 720x1280 숏폼 규격으로 가볍게 설정 (메모리 사용량 60% 이상 감소)
     image_clip = ImageClip(img_path).set_duration(duration).resize(width=720).set_position("center")
     bg_clip = ImageClip(img_path).resize((720, 1280)).set_duration(duration)
 
     final_video = CompositeVideoClip([bg_clip, image_clip]).set_audio(audio_clip)
-    
-    # threads=1, preset="ultrafast"로 RAM 순간 점유율 200MB 이하 유지
     final_video.write_videofile(
         output_path,
         fps=20,
@@ -87,7 +91,7 @@ async def run_pipeline(req: PipelineRequest):
         communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
         await communicate.save(audio_path)
 
-        # 3. 로컬 썸네일 이미지 직접 생성
+        # 3. 로컬 썸네일 이미지 생성
         img_path = "/tmp/thumb.jpg"
         create_local_image(img_path)
 
@@ -99,6 +103,7 @@ async def run_pipeline(req: PipelineRequest):
         return {
             "success": True,
             "script": script,
+            "video_url": "https://toss-automation-backend.onrender.com/download-video",
             "message": "비용 0원 완전 무료 파이프라인으로 영상 생성이 성공적으로 완료되었습니다!"
         }
     except Exception as e:
