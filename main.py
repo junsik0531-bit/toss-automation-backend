@@ -1,5 +1,4 @@
 import os
-import re
 import asyncio
 from PIL import Image
 
@@ -38,6 +37,44 @@ class PipelineRequest(BaseModel):
 def home():
     return {"status": "Free Automation Server is running"}
 
+# --- [추가된 위치 1] 인기 아이템 수집 API ---
+@app.get("/fetch-trending-items")
+async def fetch_trending_items():
+    """토스 쉐어링크 인기 아이템 수집 기능"""
+    try:
+        sample_items = [
+            {
+                "name": "무선 미니 마사지건",
+                "original_price": "59,000원",
+                "discount_rate": "49%",
+                "sale_price": "29,900원",
+                "usage": "운동 후 근육 풀기, 목 어깨 통증 완화",
+                "date": "2026-09-24",
+                "reels": True, "shorts": False, "blog": False
+            },
+            {
+                "name": "초음파 세척기 스마트 2세대",
+                "original_price": "39,000원",
+                "discount_rate": "35%",
+                "sale_price": "25,350원",
+                "usage": "안경, 시계, 장신구 기름때 제거",
+                "date": "2026-09-24",
+                "reels": False, "shorts": False, "blog": False
+            },
+            {
+                "name": "접이식 휴대용 독서대",
+                "original_price": "24,000원",
+                "discount_rate": "40%",
+                "sale_price": "14,400원",
+                "usage": "태블릿 및 책 고정, 바른 자세 유지",
+                "date": "2026-09-24",
+                "reels": False, "shorts": True, "blog": False
+            }
+        ]
+        return {"success": True, "items": sample_items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/download-video")
 def download_video():
     video_path = "/tmp/output_shorts.mp4"
@@ -46,15 +83,12 @@ def download_video():
     raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
 
 def fetch_product_image(url: str, save_path: str):
-    """토스 상품 링크(og:image)에서 실제 상품 이미지를 자동 추출 및 다운로드"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     try:
         res = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(res.text, 'html.parser')
-        
-        # OpenGraph 메타 태그에서 대표 이미지 URL 찾기
         og_image = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "og:image"})
         
         if og_image and og_image.get("content"):
@@ -66,7 +100,6 @@ def fetch_product_image(url: str, save_path: str):
     except Exception:
         pass
     
-    # 이미지 추출 실패 시 대체용 파란색 바탕 생성
     img = Image.new('RGB', (720, 720), color=(49, 130, 246))
     img.save(save_path)
     return False
@@ -75,7 +108,6 @@ def make_video_sync(audio_path: str, img_path: str, output_path: str):
     audio_clip = AudioFileClip(audio_path)
     duration = audio_clip.duration
 
-    # 메모리 절약형 720x1280 숏폼 영상 구성
     image_clip = ImageClip(img_path).set_duration(duration).resize(width=720).set_position("center")
     bg_clip = ImageClip(img_path).resize((720, 1280)).set_duration(duration)
 
@@ -116,7 +148,7 @@ async def run_pipeline(req: PipelineRequest):
         communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
         await communicate.save(audio_path)
 
-        # 3. 토스 링크에서 실제 상품 이미지 다운로드 (추출 실패 시 기본 파란색 예외 처리)
+        # 3. 토스 링크 이미지 다운로드
         img_path = "/tmp/thumb.jpg"
         fetch_product_image(req.product_url, img_path)
 
