@@ -2,7 +2,7 @@ import os
 import asyncio
 from PIL import Image
 
-# 최신 Pillow 버전과 MoviePy 간 ANTIALIAS 호환성 오류 패치
+# 최신 Pillow 버전과 MoviePy 간 ANTIALIAS 호환성 패치
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
@@ -37,38 +37,43 @@ class PipelineRequest(BaseModel):
 def home():
     return {"status": "Free Automation Server is running"}
 
-# --- [추가된 위치 1] 인기 아이템 수집 API ---
 @app.get("/fetch-trending-items")
 async def fetch_trending_items():
-    """토스 쉐어링크 인기 아이템 수집 기능"""
+    """토스 인기 상품 및 리워드 쉐어링크 정보 수집"""
     try:
         sample_items = [
             {
+                "id": "item_01",
                 "name": "무선 미니 마사지건",
                 "original_price": "59,000원",
                 "discount_rate": "49%",
                 "sale_price": "29,900원",
                 "usage": "운동 후 근육 풀기, 목 어깨 통증 완화",
+                "share_link": "https://toss.shopping/_m/pPn2t5qo",
                 "date": "2026-09-24",
-                "reels": True, "shorts": False, "blog": False
+                "reels": False, "shorts": False, "blog": False
             },
             {
+                "id": "item_02",
                 "name": "초음파 세척기 스마트 2세대",
                 "original_price": "39,000원",
                 "discount_rate": "35%",
                 "sale_price": "25,350원",
                 "usage": "안경, 시계, 장신구 기름때 제거",
+                "share_link": "https://toss.shopping/_m/example02",
                 "date": "2026-09-24",
                 "reels": False, "shorts": False, "blog": False
             },
             {
+                "id": "item_03",
                 "name": "접이식 휴대용 독서대",
                 "original_price": "24,000원",
                 "discount_rate": "40%",
                 "sale_price": "14,400원",
                 "usage": "태블릿 및 책 고정, 바른 자세 유지",
+                "share_link": "https://toss.shopping/_m/example03",
                 "date": "2026-09-24",
-                "reels": False, "shorts": True, "blog": False
+                "reels": False, "shorts": False, "blog": False
             }
         ]
         return {"success": True, "items": sample_items}
@@ -160,6 +165,7 @@ async def run_pipeline(req: PipelineRequest):
         return {
             "success": True,
             "script": script,
+            "share_link": req.product_url,
             "video_url": "https://toss-automation-backend.onrender.com/download-video",
             "message": "비용 0원 완전 무료 파이프라인으로 영상 생성이 성공적으로 완료되었습니다!"
         }
