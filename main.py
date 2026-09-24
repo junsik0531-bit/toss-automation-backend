@@ -1,11 +1,17 @@
 import os
 import asyncio
+from PIL import Image, ImageDraw
+
+# 최신 Pillow 버전과 MoviePy 간 ANTIALIAS 호환성 오류 패치
+if not hasattr(Image, 'ANTIALIAS'):
+    Image.ANTIALIAS = Image.Resampling.LANCZOS
+
 import google.generativeai as genai
 import edge_tts
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
 
 app = FastAPI()
@@ -30,10 +36,8 @@ def home():
     return {"status": "Free Automation Server is running"}
 
 def create_local_image(output_path: str):
-    """외부 서버 요청 대신 파이썬 Pillow 라이브러리로 1080x1080 임시 썸네일 직접 생성 (SSL 에러 방지)"""
-    img = Image.new('RGB', (1080, 1080), color=(49, 130, 246))  # 토스 블루 색상 (#3182F6)
-    draw = ImageDraw.Draw(img)
-    # 이미지 생성 완료 후 저장
+    """Pillow 라이브러리로 1080x1080 임시 썸네일 직접 생성"""
+    img = Image.new('RGB', (1080, 1080), color=(49, 130, 246))  # 토스 블루 (#3182F6)
     img.save(output_path)
 
 def make_video_sync(audio_path: str, img_path: str, output_path: str):
@@ -78,7 +82,7 @@ async def run_pipeline(req: PipelineRequest):
         communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
         await communicate.save(audio_path)
 
-        # 3. 로컬 썸네일 이미지 직접 생성 (SSL 에러 원인 제거)
+        # 3. 로컬 썸네일 이미지 직접 생성
         img_path = "/tmp/thumb.jpg"
         create_local_image(img_path)
 
