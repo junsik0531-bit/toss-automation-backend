@@ -52,7 +52,7 @@ async def run_pipeline(req: PipelineRequest):
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY가 설정되지 않았습니다.")
 
         # 1. Gemini AI 대본 작성 (gemini-1.5-flash 표준 호출 방식)
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"토스 추천 상품 링크({req.product_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘. 부연설명 없이 읽을 나레이션 텍스트만 출력해줘."
         
         response = model.generate_content(prompt)
