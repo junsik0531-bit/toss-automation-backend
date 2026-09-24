@@ -1,11 +1,11 @@
 import os
 import asyncio
-import requests
 import google.generativeai as genai
 import edge_tts
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
 
 app = FastAPI()
@@ -29,6 +29,13 @@ class PipelineRequest(BaseModel):
 def home():
     return {"status": "Free Automation Server is running"}
 
+def create_local_image(output_path: str):
+    """외부 서버 요청 대신 파이썬 Pillow 라이브러리로 1080x1080 임시 썸네일 직접 생성 (SSL 에러 방지)"""
+    img = Image.new('RGB', (1080, 1080), color=(49, 130, 246))  # 토스 블루 색상 (#3182F6)
+    draw = ImageDraw.Draw(img)
+    # 이미지 생성 완료 후 저장
+    img.save(output_path)
+
 def make_video_sync(audio_path: str, img_path: str, output_path: str):
     audio_clip = AudioFileClip(audio_path)
     duration = audio_clip.duration
@@ -51,42 +58,39 @@ async def run_pipeline(req: PipelineRequest):
         if not GEMINI_KEY:
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY가 설정되지 않았습니다.")
 
-        # 에러 메시지에서 추천한 최신 권장 모델 'gemini-3.6-flash' 사용
+        # 1. Gemini AI 대본 작성
         try:
             model = genai.GenerativeModel('gemini-3.6-flash')
             prompt = f"토스 추천 상품 링크({req.product_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘. 부연설명 없이 읽을 나레이션 텍스트만 출력해줘."
             response = model.generate_content(prompt)
             script = response.text.strip()
-        except Exception as model_err:
-            # 예외 발생 시 지원되는 첫 번째 최신 모델로 자동 폴백
+        except Exception:
             available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
             if available_models:
                 model = genai.GenerativeModel(available_models[0])
                 response = model.generate_content(f"토스 추천 상품 링크({req.product_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘.")
                 script = response.text.strip()
             else:
-                raise model_err
+                raise HTTPException(status_code=500, detail="이용 가능한 Gemini 모델을 찾을 수 없습니다.")
 
-        # Edge-TTS 음성 생성
+        # 2. Edge-TTS 음성 파일 생성
         audio_path = "/tmp/narration.mp3"
         communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
         await communicate.save(audio_path)
 
-        # 이미지 다운로드 및 쇼츠 영상 합성
+        # 3. 로컬 썸네일 이미지 직접 생성 (SSL 에러 원인 제거)
         img_path = "/tmp/thumb.jpg"
-        img_bytes = requests.get("https://via.placeholder.com/1080x1080.png?text=Toss+Hotdeal").content
-        with open(img_path, "wb") as f:
-            f.write(img_bytes)
+        create_local_image(img_path)
 
+        # 4. 쇼츠 영상 렌더링
         video_path = "/tmp/output_shorts.mp4"
-        
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, make_video_sync, audio_path, img_path, video_path)
 
         return {
             "success": True,
             "script": script,
-            "message": "비용 0원 무료 파이프라인으로 영상 생성이 완료되었습니다!"
+            "message": "비용 0원 완전 무료 파이프라인으로 영상 생성이 성공적으로 완료되었습니다!"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
