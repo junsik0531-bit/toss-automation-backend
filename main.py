@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 from PIL import Image
 
@@ -8,6 +9,8 @@ if not hasattr(Image, 'ANTIALIAS'):
 
 import google.generativeai as genai
 import edge_tts
+import requests
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -37,20 +40,42 @@ def home():
 
 @app.get("/download-video")
 def download_video():
-    """생성된 MP4 영상을 웹으로 전달하는 엔드포인트"""
     video_path = "/tmp/output_shorts.mp4"
     if os.path.exists(video_path):
         return FileResponse(video_path, media_type="video/mp4", filename="toss_shorts.mp4")
     raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
 
-def create_local_image(output_path: str):
+def fetch_product_image(url: str, save_path: str):
+    """토스 상품 링크(og:image)에서 실제 상품 이미지를 자동 추출 및 다운로드"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        res = requests.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        # OpenGraph 메타 태그에서 대표 이미지 URL 찾기
+        og_image = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "og:image"})
+        
+        if og_image and og_image.get("content"):
+            img_url = og_image["content"]
+            img_data = requests.get(img_url, headers=headers, timeout=5).content
+            with open(save_path, "wb") as f:
+                f.write(img_data)
+            return True
+    except Exception:
+        pass
+    
+    # 이미지 추출 실패 시 대체용 파란색 바탕 생성
     img = Image.new('RGB', (720, 720), color=(49, 130, 246))
-    img.save(output_path)
+    img.save(save_path)
+    return False
 
 def make_video_sync(audio_path: str, img_path: str, output_path: str):
     audio_clip = AudioFileClip(audio_path)
     duration = audio_clip.duration
 
+    # 메모리 절약형 720x1280 숏폼 영상 구성
     image_clip = ImageClip(img_path).set_duration(duration).resize(width=720).set_position("center")
     bg_clip = ImageClip(img_path).resize((720, 1280)).set_duration(duration)
 
@@ -91,11 +116,11 @@ async def run_pipeline(req: PipelineRequest):
         communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
         await communicate.save(audio_path)
 
-        # 3. 로컬 썸네일 이미지 생성
+        # 3. 토스 링크에서 실제 상품 이미지 다운로드 (추출 실패 시 기본 파란색 예외 처리)
         img_path = "/tmp/thumb.jpg"
-        create_local_image(img_path)
+        fetch_product_image(req.product_url, img_path)
 
-        # 4. 메모리 최적화 쇼츠 영상 렌더링
+        # 4. 쇼츠 영상 렌더링
         video_path = "/tmp/output_shorts.mp4"
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, make_video_sync, audio_path, img_path, video_path)
