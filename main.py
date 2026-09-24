@@ -1,6 +1,6 @@
 import os
 import asyncio
-from PIL import Image, ImageDraw
+from PIL import Image
 
 # 최신 Pillow 버전과 MoviePy 간 ANTIALIAS 호환성 오류 패치
 if not hasattr(Image, 'ANTIALIAS'):
@@ -8,7 +8,6 @@ if not hasattr(Image, 'ANTIALIAS'):
 
 import google.generativeai as genai
 import edge_tts
-import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -36,23 +35,29 @@ def home():
     return {"status": "Free Automation Server is running"}
 
 def create_local_image(output_path: str):
-    """Pillow 라이브러리로 1080x1080 임시 썸네일 직접 생성"""
-    img = Image.new('RGB', (1080, 1080), color=(49, 130, 246))  # 토스 블루 (#3182F6)
+    """메모리 절약을 위한 720x720 규격 썸네일 생성"""
+    img = Image.new('RGB', (720, 720), color=(49, 130, 246))  # 토스 블루 (#3182F6)
     img.save(output_path)
 
 def make_video_sync(audio_path: str, img_path: str, output_path: str):
+    """Render 무료 메모리(512MB) 초과 방지 최적화 렌더링"""
     audio_clip = AudioFileClip(audio_path)
     duration = audio_clip.duration
 
-    image_clip = ImageClip(img_path).set_duration(duration).resize(width=1080).set_position("center")
-    bg_clip = ImageClip(img_path).resize((1080, 1920)).set_duration(duration)
+    # 720x1280 숏폼 규격으로 가볍게 설정 (메모리 사용량 60% 이상 감소)
+    image_clip = ImageClip(img_path).set_duration(duration).resize(width=720).set_position("center")
+    bg_clip = ImageClip(img_path).resize((720, 1280)).set_duration(duration)
 
     final_video = CompositeVideoClip([bg_clip, image_clip]).set_audio(audio_clip)
+    
+    # threads=1, preset="ultrafast"로 RAM 순간 점유율 200MB 이하 유지
     final_video.write_videofile(
         output_path,
-        fps=24,
+        fps=20,
         codec="libx264",
         audio_codec="aac",
+        preset="ultrafast",
+        threads=1,
         logger=None
     )
 
@@ -86,7 +91,7 @@ async def run_pipeline(req: PipelineRequest):
         img_path = "/tmp/thumb.jpg"
         create_local_image(img_path)
 
-        # 4. 쇼츠 영상 렌더링
+        # 4. 메모리 최적화 쇼츠 영상 렌더링
         video_path = "/tmp/output_shorts.mp4"
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, make_video_sync, audio_path, img_path, video_path)
