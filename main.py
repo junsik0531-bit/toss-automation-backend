@@ -1,9 +1,11 @@
 import os
+import asyncio
 import requests
+import google.generativeai as genai
+import edge_tts
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from openai import OpenAI
 from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
 
 app = FastAPI()
@@ -16,40 +18,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_KEY)
+# Google Gemini API 키 설정
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
 
 class PipelineRequest(BaseModel):
     product_url: str
 
 @app.get("/")
 def home():
-    return {"status": "Server is running"}
+    return {"status": "Free Automation Server is running"}
 
 @app.post("/run-pipeline")
-def run_pipeline(req: PipelineRequest):
+async def run_pipeline(req: PipelineRequest):
     try:
-        # 1. 간단 상품 파싱 (클라우드 환경에 맞춰 가볍게 처리)
-        product_title = "토스 핫딜 추천 상품"
+        # 1. Gemini API로 무료 대본 작성
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"토스 추천 상품 링크({req.product_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘. 다른 부연설명 없이 영상에 들어갈 읽을 대본 텍스트만 출력해줘."
         
-        # 2. OpenAI 대본 및 TTS 생성
-        prompt = f"토스 추천 상품 링크({req.product_url})를 홍보하는 15초 숏폼 나레이션 대본을 써줘. 다른 말 없이 대본만 출력해줘."
-        res = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        script = res.choices[0].message.content.strip()
+        response = model.generate_content(prompt)
+        script = response.text.strip()
 
-        # TTS 생성
+        # 2. Edge-TTS로 무료 음성 파일(.mp3) 생성 (한국어 여성 음성: ko-KR-SunHiNeural)
         audio_path = "/tmp/narration.mp3"
-        tts_res = client.audio.speech.create(
-            model="tts-1",
-            voice="alloy",
-            input=script
-        )
-        tts_res.stream_to_file(audio_path)
+        communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
+        await communicate.save(audio_path)
 
-        # 3. 임시 이미지 다운로드 및 영상 합성 (MoviePy)
+        # 3. 임시 이미지 다운로드 및 9:16 영상 합성 (MoviePy)
         img_path = "/tmp/thumb.jpg"
         img_bytes = requests.get("https://via.placeholder.com/1080x1080.png?text=Toss+Hotdeal").content
         with open(img_path, "wb") as f:
@@ -63,12 +59,21 @@ def run_pipeline(req: PipelineRequest):
 
         final_video = CompositeVideoClip([bg_clip, image_clip]).set_audio(audio_clip)
         video_path = "/tmp/output_shorts.mp4"
-        final_video.write_videofile(video_path, fps=24, codec="libx264", audio_codec="aac", logger=None)
+        
+        # 동기 작업을 비동기 스레드로 실행
+        await asyncio.to_thread(
+            final_video.write_videofile,
+            video_path,
+            fps=24,
+            codec="libx264",
+            audio_codec="aac",
+            logger=None
+        )
 
         return {
             "success": True,
             "script": script,
-            "message": "영상이 정상적으로 생성되었습니다."
+            "message": "비용 0원 무료 파이프라인으로 영상 생성이 완료되었습니다!"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
