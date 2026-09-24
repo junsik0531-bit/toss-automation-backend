@@ -30,7 +30,6 @@ def home():
     return {"status": "Free Automation Server is running"}
 
 def make_video_sync(audio_path: str, img_path: str, output_path: str):
-    """MoviePy 동기 렌더링 함수"""
     audio_clip = AudioFileClip(audio_path)
     duration = audio_clip.duration
 
@@ -72,7 +71,6 @@ async def run_pipeline(req: PipelineRequest):
 
         video_path = "/tmp/output_shorts.mp4"
         
-        # 스레드풀에서 동기 렌더링 실행
         await asyncio.to_thread(make_video_sync, audio_path, img_path, video_path)
 
         return {
