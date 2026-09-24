@@ -51,14 +51,14 @@ async def run_pipeline(req: PipelineRequest):
         if not GEMINI_KEY:
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY가 설정되지 않았습니다.")
 
-        # 가장 호환성이 뛰어난 gemini-1.5-flash-latest 사용
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # 최신 SDK 기준 정식 모델 명칭 사용
+        model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"토스 추천 상품 링크({req.product_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘. 부연설명 없이 읽을 나레이션 텍스트만 출력해줘."
         
         response = model.generate_content(prompt)
         script = response.text.strip()
 
-        # Edge-TTS 음성 파일 생성
+        # Edge-TTS 무료 음성 파일 생성
         audio_path = "/tmp/narration.mp3"
         communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
         await communicate.save(audio_path)
