@@ -3,7 +3,3 @@ uvicorn
 requests
 beautifulsoup4
 google-generativeai
-edge-tts
-pillow
-moviepy==1.0.3
-proglog
