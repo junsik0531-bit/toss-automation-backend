@@ -57,11 +57,11 @@ def build_toss_user_link(raw_url: str) -> str:
         return f"{raw_url}{sep}userId={TOSS_USER_ID}"
 
 def generate_3_features(product_name: str, desc: str) -> list:
-    """Gemini AI를 이용한 상품 장점 3가지 자동 요약 추출"""
-    if GEMINI_KEY:
+    """Gemini AI를 이용한 장점 3가지 요약 (특수문자 점/불릿 완전 제거)"""
+    if GEMINI_KEY and product_name and product_name != "토스 파트너스 추천 핫딜":
         try:
             model = genai.GenerativeModel('gemini-3.6-flash')
-            prompt = f"상품명: '{product_name}' (설명: {desc})의 가장 핵심적인 장점/소구점 3가지를 구체적인 단어 위주로 짧게 3개의 항목으로만 작성해줘. 예시:\n1. 고단백/저당 구성\n2. 겉바속촉 식감\n3. 개별 포장 보관 용이"
+            prompt = f"상품명: '{product_name}' (설명: {desc})의 핵심 장점 3가지를 단어/구문 형태로 출력해줘. 점, 기호, 번호 등 불릿 없이 순수 텍스트 3줄만 출력해줘."
             res = model.generate_content(prompt)
             lines = [l.strip() for l in res.text.split('\n') if l.strip()]
             clean_features = []
@@ -73,10 +73,10 @@ def generate_3_features(product_name: str, desc: str) -> list:
                 return clean_features[:3]
         except Exception:
             pass
-    return ["우수한 가성비 및 할인혜택", "사용자 실후기 호평 대란템", "간편한 보관 및 실용적인 활용"]
+    return ["우수한 가성비 및 특가 혜택", "실구매자 호평 검증 아이템", "실용적인 구성 및 간편 활용"]
 
 def parse_toss_meta(url: str):
-    """토스 쉐어링크 메타데이터 파싱 및 장점 추출"""
+    """토스 쉐어링크 메타데이터 파싱"""
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -102,14 +102,14 @@ def parse_toss_meta(url: str):
         desc = og_desc["content"].strip() if og_desc and og_desc.get("content") else "토스 파트너스 추천 핫딜 상품"
 
         return {
-            "title": title if title else "토스 파트너스 추천 핫딜",
+            "title": title if title and title != "토스" else None,
             "desc": desc,
             "img_url": img_url,
             "real_url": res.url
         }
     except Exception:
         return {
-            "title": "토스 파트너스 추천 핫딜",
+            "title": None,
             "desc": "토스 파트너스 추천 핫딜 상품",
             "img_url": None,
             "real_url": url
@@ -117,25 +117,26 @@ def parse_toss_meta(url: str):
 
 @app.get("/")
 def home():
-    return {"status": "Free Automation Server with Custom Link & Feature Extractor is running"}
+    return {"status": "Free Automation Server with Clean Features Parser is running"}
 
 @app.post("/parse-custom-link")
 async def parse_custom_link(req: PipelineRequest):
-    """사용자가 직접 입력한 토스 쉐어링크 파싱 및 장점 3가지 자동 구성"""
+    """수동 입력 링크 파싱"""
     share_url = build_toss_user_link(req.product_url)
     meta = parse_toss_meta(share_url)
-    features = generate_3_features(meta["title"], meta["desc"])
+    product_name = meta.get("title") or "토스 핫딜 추천 상품"
+    features = generate_3_features(product_name, meta.get("desc", ""))
 
     return {
         "success": True,
         "item": {
             "id": f"custom_{int(asyncio.get_event_loop().time())}",
-            "name": meta["title"],
+            "name": product_name,
             "features": features,
-            "original_price": "상세 참조",
+            "original_price": "토스 앱 참조",
             "discount_rate": "특가 할인",
             "sale_price": "토스 앱 특가",
-            "usage": meta["desc"],
+            "usage": meta.get("desc", "토스 파트너스 추천 상품"),
             "share_link": share_url,
             "date": "2026-09-28",
             "reels": False, "shorts": False, "blog": False
@@ -144,7 +145,7 @@ async def parse_custom_link(req: PipelineRequest):
 
 @app.get("/fetch-trending-items")
 async def fetch_trending_items():
-    """인기 아이템 수집 및 장점 3가지 결합"""
+    """아이템 수집: 메타 파싱 성공한 유효 상품만 선별 반환"""
     active_sample_links = [
         "https://toss.shopping/_m/pPn2t5qo",
         "https://toss.shopping/_m/J61l5Lsj",
@@ -157,21 +158,23 @@ async def fetch_trending_items():
     for idx, raw_link in enumerate(active_sample_links, 1):
         share_url = build_toss_user_link(raw_link)
         meta_info = parse_toss_meta(share_url)
-        product_name = meta_info.get("title") or f"토스 추천 핫딜 상품 0{idx}"
-        features = generate_3_features(product_name, meta_info.get("desc", ""))
-
-        items.append({
-            "id": f"item_0{idx}",
-            "name": product_name,
-            "features": features,
-            "original_price": "상세 참조",
-            "discount_rate": "특가 할인",
-            "sale_price": "토스 앱 특가",
-            "usage": meta_info.get("desc", "토스 파트너스 추천 핫딜"),
-            "share_link": share_url,
-            "date": "2026-09-28",
-            "reels": False, "shorts": False, "blog": False
-        })
+        product_name = meta_info.get("title")
+        
+        # 파싱에 성공한 유효 상품만 추가 (껍데기 상품 제거)
+        if product_name and product_name != "토스 파트너스 추천 핫딜":
+            features = generate_3_features(product_name, meta_info.get("desc", ""))
+            items.append({
+                "id": f"item_0{idx}",
+                "name": product_name,
+                "features": features,
+                "original_price": "토스 앱 참조",
+                "discount_rate": "특가 할인",
+                "sale_price": "토스 앱 특가",
+                "usage": meta_info.get("desc", "토스 파트너스 추천 핫딜"),
+                "share_link": share_url,
+                "date": "2026-09-28",
+                "reels": False, "shorts": False, "blog": False
+            })
 
     return {"success": True, "items": items}
 
