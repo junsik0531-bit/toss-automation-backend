@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
+from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip, TextClip, ConcatenateVideoClip
 
 app = FastAPI()
 
@@ -58,7 +58,7 @@ def generate_3_features(product_name: str, desc: str) -> list:
     if GEMINI_KEY and product_name:
         try:
             model = genai.GenerativeModel('gemini-3.6-flash')
-            prompt = f"상품명: '{product_name}' (설명: {desc})의 핵심 장점 3가지를 단어/구문 형태로 출력해줘. 불릿이나 기호, 번호 없이 오직 텍스트 3줄만 출력해줘."
+            prompt = f"상품명: '{product_name}' (설명: {desc})의 핵심 장점 3가지를 단어/구문 형태로 출력해줘. 기호나 번호 없이 오직 텍스트 3줄만 출력해줘."
             res = model.generate_content(prompt)
             lines = [l.strip() for l in res.text.split('\n') if l.strip()]
             clean_features = []
@@ -113,7 +113,7 @@ def parse_toss_meta(url: str):
 
 @app.get("/")
 def home():
-    return {"status": "Free Automation Pipeline is running"}
+    return {"status": "Multi-Image & Subtitle Shorts Generator is running"}
 
 @app.post("/parse-custom-link")
 async def parse_custom_link(req: PipelineRequest):
@@ -130,6 +130,7 @@ async def parse_custom_link(req: PipelineRequest):
             "features": features,
             "usage": meta.get("desc", "토스 파트너스 추천 상품"),
             "share_link": share_url,
+            "img_url": meta.get("img_url"),
             "date": "2026-09-28",
             "reels": False, "shorts": False, "blog": False
         }
@@ -156,6 +157,7 @@ async def fetch_trending_items():
                 "features": features,
                 "usage": meta_info.get("desc", "토스 파트너스 추천 핫딜"),
                 "share_link": share_url,
+                "img_url": meta_info.get("img_url"),
                 "date": "2026-09-28",
                 "reels": False, "shorts": False, "blog": False
             })
@@ -168,6 +170,13 @@ def download_video():
     if os.path.exists(video_path):
         return FileResponse(video_path, media_type="video/mp4", filename="toss_shorts.mp4")
     raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
+
+@app.get("/download-image")
+def download_image():
+    img_path = "/tmp/thumb.jpg"
+    if os.path.exists(img_path):
+        return FileResponse(img_path, media_type="image/jpeg", filename="product_thumb.jpg")
+    raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다.")
 
 def download_product_image(img_url: str, save_path: str):
     headers = {
@@ -186,14 +195,69 @@ def download_product_image(img_url: str, save_path: str):
     img.save(save_path)
     return False
 
-def make_video_sync(audio_path: str, img_path: str, output_path: str):
+def create_feature_card_image(title_text: str, bg_color=(25, 31, 40), text_color=(255, 255, 255), save_path="/tmp/card.jpg"):
+    img = Image.new('RGB', (720, 720), color=bg_color)
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 42)
+    except Exception:
+        font = ImageFont.load_default()
+    
+    bbox = draw.textbbox((0, 0), title_text, font=font)
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+    draw.text(((720 - w) / 2, (720 - h) / 2), title_text, fill=text_color, font=font)
+    img.save(save_path)
+
+def make_multi_image_video_with_subtitles(audio_path: str, img_path: str, product_title: str, script: str, features: list, output_path: str):
     audio_clip = AudioFileClip(audio_path)
     duration = audio_clip.duration
 
-    image_clip = ImageClip(img_path).set_duration(duration).resize(width=720).set_position("center")
-    bg_clip = ImageClip(img_path).resize((720, 1280)).set_duration(duration)
+    # 다채로운 이미지를 연출하기 위한 카드 3장 생성
+    card1_path = "/tmp/card1.jpg"
+    card2_path = "/tmp/card2.jpg"
+    feat_text1 = features[0] if len(features) > 0 else "강력 추천 포인트 01"
+    feat_text2 = features[1] if len(features) > 1 else "압도적 가성비 구성"
+    
+    create_feature_card_image(f"🔥 {feat_text1}", bg_color=(49, 130, 246), save_path=card1_path)
+    create_feature_card_image(f"✨ {feat_text2}", bg_color=(19, 115, 51), save_path=card2_path)
 
-    final_video = CompositeVideoClip([bg_clip, image_clip]).set_audio(audio_clip)
+    clip_duration = duration / 3.0
+
+    # 이미지 슬라이드 3개 조합 (원본 이미지 + 특징 카드1 + 특징 카드2)
+    c1 = ImageClip(img_path).set_duration(clip_duration).resize(width=720).set_position("center")
+    c2 = ImageClip(card1_path).set_duration(clip_duration).resize(width=720).set_position("center")
+    c3 = ImageClip(card2_path).set_duration(clip_duration).resize(width=720).set_position("center")
+
+    bg1 = ImageClip(img_path).resize((720, 1280)).set_duration(clip_duration)
+    bg2 = ImageClip(card1_path).resize((720, 1280)).set_duration(clip_duration)
+    bg3 = ImageClip(card2_path).resize((720, 1280)).set_duration(clip_duration)
+
+    v1 = CompositeVideoClip([bg1, c1])
+    v2 = CompositeVideoClip([bg2, c2])
+    v3 = CompositeVideoClip([bg3, c3])
+
+    video_concat = ConcatenateVideoClip([v1, v2, v3]).set_audio(audio_clip)
+
+    # 하단 자막 텍스트 오버레이 카드 추가
+    sub_card_path = "/tmp/sub_card.png"
+    sub_img = Image.new('RGBA', (680, 120), color=(0, 0, 0, 180))
+    sub_draw = ImageDraw.Draw(sub_img)
+    try:
+        sub_font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 28)
+    except Exception:
+        sub_font = ImageFont.load_default()
+
+    short_script = script[:25] + "..." if len(script) > 25 else script
+    bbox = sub_draw.textbbox((0, 0), short_script, font=sub_font)
+    sw = bbox[2] - bbox[0]
+    sh = bbox[3] - bbox[1]
+    sub_draw.text(((680 - sw) / 2, (120 - sh) / 2), short_script, fill=(255, 255, 0), font=sub_font)
+    sub_img.save(sub_card_path)
+
+    sub_clip = ImageClip(sub_card_path).set_duration(duration).set_position(("center", 1000))
+    final_video = CompositeVideoClip([video_concat, sub_clip])
+
     final_video.write_videofile(
         output_path,
         fps=20,
@@ -204,7 +268,6 @@ def make_video_sync(audio_path: str, img_path: str, output_path: str):
         logger=None
     )
 
-# 숏폼 영상 및 대본 생성
 @app.post("/run-pipeline")
 async def run_pipeline(req: PipelineRequest):
     try:
@@ -213,6 +276,7 @@ async def run_pipeline(req: PipelineRequest):
 
         meta_info = parse_toss_meta(req.product_url)
         product_title = meta_info.get("title") or "토스 핫딜 추천 상품"
+        features = generate_3_features(product_title, meta_info.get("desc", ""))
 
         model = genai.GenerativeModel('gemini-3.6-flash')
         prompt = f"상품명: '{product_title}' (구매 링크: {req.product_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘. 설명 없이 오직 읽을 대본 문장만 출력해줘."
@@ -228,19 +292,19 @@ async def run_pipeline(req: PipelineRequest):
 
         video_path = "/tmp/output_shorts.mp4"
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, make_video_sync, audio_path, img_path, video_path)
+        await loop.run_in_executor(None, make_multi_image_video_with_subtitles, audio_path, img_path, product_title, script, features, video_path)
 
         return {
             "success": True,
             "product_name": product_title,
             "script": script,
             "share_link": req.product_url,
-            "video_url": "https://toss-automation-backend.onrender.com/download-video"
+            "video_url": "https://toss-automation-backend.onrender.com/download-video",
+            "image_url": "https://toss-automation-backend.onrender.com/download-image"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 네이버 블로그 원고 작성
 @app.post("/generate-blog")
 async def generate_blog(req: PipelineRequest):
     try:
@@ -251,15 +315,19 @@ async def generate_blog(req: PipelineRequest):
         product_title = meta_info.get("title") or "토스 핫딜 추천 상품"
 
         model = genai.GenerativeModel('gemini-3.6-flash')
-        prompt = f"상품명: '{product_title}' (설명: {meta_info.get('desc')})에 대한 네이버 블로그 솔직 후기 포스팅을 작성해줘. 제목, 서론, 주요 특징 및 추천 이유, 그리고 하단에 구매 링크({req.product_url}) 안내 문구를 포함해서 완성된 원고를 작성해줘."
+        prompt = f"상품명: '{product_title}' (설명: {meta_info.get('desc')})에 대한 네이버 블로그 솔직 후기 포스팅을 작성해줘. 제목, 서론, 본문 중간 이미지 들어갈 위치 [📷 대표 상품 이미지 삽입], 주요 특징 및 추천 이유, 그리고 하단에 구매 링크({req.product_url}) 안내 문구를 포함해서 완성된 원고를 작성해줘."
         response = model.generate_content(prompt)
         blog_post = response.text.strip()
+
+        img_path = "/tmp/thumb.jpg"
+        download_product_image(meta_info.get("img_url"), img_path)
 
         return {
             "success": True,
             "product_name": product_title,
             "blog_post": blog_post,
-            "share_link": req.product_url
+            "share_link": req.product_url,
+            "image_url": "https://toss-automation-backend.onrender.com/download-image"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
