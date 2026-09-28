@@ -28,8 +28,6 @@ app.add_middleware(
 )
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-TOSS_ACCESS_KEY = os.getenv("TOSS_CLIENT_ID", "")
-TOSS_SECRET_KEY = os.getenv("TOSS_CLIENT_SECRET", "")
 TOSS_USER_ID = os.getenv("TOSS_USER_ID", "")
 
 if GEMINI_KEY:
@@ -72,7 +70,7 @@ def generate_3_features(product_name: str, desc: str) -> list:
                 return clean_features[:3]
         except Exception as e:
             print(f"[FEATURE GEN ERROR] {e}")
-    return ["고단백 저당 건강 구성", "소비자 선호 및 평가 우수", "간편하고 실용적인 활용"]
+    return ["우수한 가성비 및 알찬 구성", "사용자 구매 후기 만족도 우수", "실용적인 간편 활용성"]
 
 def parse_toss_meta(url: str):
     headers = {
@@ -97,12 +95,11 @@ def parse_toss_meta(url: str):
         img_url = og_image["content"] if og_image and og_image.get("content") else None
 
         og_desc = soup.find("meta", property="og:description") or soup.find("meta", attrs={"name": "og:description"})
-        desc = og_desc["content"].strip() if og_desc and og_desc.get("content") else "토스 파트너스 추천 상품"
+        desc = og_desc["content"].strip() if og_desc and og_desc.get("content") else "토스 추천 인기 상품"
 
-        # 불완전한 파싱 명칭 필터링
         invalid_keywords = ["토스", "토스 파트너스", "토스 추천", "토스 핫딜", "토스 쇼핑", ""]
-        if title in invalid_keywords or "토스" == title:
-            return None
+        if title in invalid_keywords:
+            title = "토스 핫딜 추천 상품"
 
         return {
             "title": title,
@@ -112,22 +109,23 @@ def parse_toss_meta(url: str):
         }
     except Exception as e:
         print(f"[META PARSE ERROR] {e}")
-        return None
+        return {
+            "title": "토스 핫딜 추천 상품",
+            "desc": "토스 추천 인기 상품",
+            "img_url": None,
+            "real_url": url
+        }
 
 @app.get("/")
 def home():
-    return {"status": "Strict Filtering Toss Pipeline Backend is running"}
+    return {"status": "Product Management Automation Pipeline Backend is running"}
 
 @app.post("/parse-custom-link")
 async def parse_custom_link(req: PipelineRequest):
     try:
         share_url = build_toss_user_link(req.product_url)
         meta = parse_toss_meta(share_url)
-        
-        if not meta or not meta.get("title"):
-            raise HTTPException(status_code=400, detail="유효한 토스 상품 정보를 가져오지 못했습니다. 실제 상품 페이지 링크인지 확인해 주세요.")
-
-        product_name = meta.get("title")
+        product_name = meta.get("title") or "토스 핫딜 추천 상품"
         features = generate_3_features(product_name, meta.get("desc", ""))
 
         return {
@@ -143,42 +141,8 @@ async def parse_custom_link(req: PipelineRequest):
                 "reels": False, "shorts": False, "blog": False
             }
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"링크 추가 실패: {str(e)}")
-
-@app.get("/fetch-trending-items")
-async def fetch_trending_items():
-    try:
-        active_sample_links = [
-            "https://toss.shopping/_m/pPn2t5qo",
-            "https://toss.shopping/_m/J61l5Lsj",
-            "https://toss.shopping/_m/x8K2m1Lz"
-        ]
-        items = []
-        for idx, raw_link in enumerate(active_sample_links, 1):
-            share_url = build_toss_user_link(raw_link)
-            meta_info = parse_toss_meta(share_url)
-            
-            # 메타 정보가 정상이 아니거나 실제 상품명이 아닌 더미 데이터는 완전히 배제
-            if meta_info and meta_info.get("title"):
-                product_name = meta_info.get("title")
-                features = generate_3_features(product_name, meta_info.get("desc", ""))
-                items.append({
-                    "id": f"item_0{idx}",
-                    "name": product_name,
-                    "features": features,
-                    "usage": meta_info.get("desc", "토스 파트너스 추천 핫딜"),
-                    "share_link": share_url,
-                    "img_url": meta_info.get("img_url"),
-                    "date": "2026-09-28",
-                    "reels": False, "shorts": False, "blog": False
-                })
-
-        return {"success": True, "items": items}
-    except Exception as e:
-        return {"success": False, "items": [], "detail": f"수집 에러: {str(e)}"}
+        raise HTTPException(status_code=500, detail=f"상품 등록 실패: {str(e)}")
 
 @app.get("/download-video")
 def download_video():
@@ -244,7 +208,7 @@ async def run_pipeline(req: PipelineRequest):
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY 설정이 누락되었습니다.")
 
         meta_info = parse_toss_meta(req.product_url)
-        product_title = meta_info.get("title") if meta_info else "토스 추천 아이템"
+        product_title = meta_info.get("title") or "토스 핫딜 추천 상품"
 
         try:
             model = genai.GenerativeModel('gemini-3.6-flash')
@@ -262,7 +226,7 @@ async def run_pipeline(req: PipelineRequest):
             raise HTTPException(status_code=500, detail=f"Edge-TTS 음성 생성 오류: {str(e)}")
 
         img_path = "/tmp/thumb.jpg"
-        download_product_image(meta_info.get("img_url") if meta_info else None, img_path)
+        download_product_image(meta_info.get("img_url"), img_path)
 
         video_path = "/tmp/output_shorts.mp4"
         try:
@@ -291,19 +255,18 @@ async def generate_blog(req: PipelineRequest):
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY 설정이 누락되었습니다.")
 
         meta_info = parse_toss_meta(req.product_url)
-        product_title = meta_info.get("title") if meta_info else "토스 추천 아이템"
+        product_title = meta_info.get("title") or "토스 핫딜 추천 상품"
 
         try:
             model = genai.GenerativeModel('gemini-3.6-flash')
-            desc_text = meta_info.get('desc') if meta_info else "인기 파트너스 추천 상품"
-            prompt = f"상품명: '{product_title}' (설명: {desc_text})에 대한 네이버 블로그 솔직 후기 포스팅을 작성해줘. 제목, 서론, 본문 중간 이미지 들어갈 위치 [📷 대표 상품 이미지 삽입], 주요 특징 및 추천 이유, 그리고 하단에 구매 링크({req.product_url}) 안내 문구를 포함해서 완성된 원고를 작성해줘."
+            prompt = f"상품명: '{product_title}' (설명: {meta_info.get('desc')})에 대한 네이버 블로그 솔직 후기 포스팅을 작성해줘. 제목, 서론, 본문 중간 이미지 들어갈 위치 [📷 대표 상품 이미지 삽입], 주요 특징 및 추천 이유, 그리고 하단에 구매 링크({req.product_url}) 안내 문구를 포함해서 완성된 원고를 작성해줘."
             response = model.generate_content(prompt)
             blog_post = response.text.strip()
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Gemini 블로그 원고 생성 오류: {str(e)}")
 
         img_path = "/tmp/thumb.jpg"
-        download_product_image(meta_info.get("img_url") if meta_info else None, img_path)
+        download_product_image(meta_info.get("img_url"), img_path)
 
         return {
             "success": True,
