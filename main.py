@@ -19,6 +19,7 @@ from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip, Concate
 
 app = FastAPI()
 
+# CORS 완벽 허용
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -142,7 +143,7 @@ async def parse_custom_link(req: PipelineRequest):
             }
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"상품 등록 실패: {str(e)}")
+        return {"success": False, "detail": f"파싱 에러: {str(e)}"}
 
 @app.get("/download-video")
 def download_video():
@@ -205,7 +206,7 @@ def make_stable_video(audio_path: str, img_path: str, output_path: str):
 async def run_pipeline(req: PipelineRequest):
     try:
         if not GEMINI_KEY:
-            raise HTTPException(status_code=500, detail="GEMINI_API_KEY 설정이 누락되었습니다.")
+            return {"success": False, "detail": "GEMINI_API_KEY 설정이 누락되었습니다."}
 
         meta_info = parse_toss_meta(req.product_url)
         product_title = meta_info.get("title") or "토스 핫딜 추천 상품"
@@ -216,14 +217,14 @@ async def run_pipeline(req: PipelineRequest):
             response = model.generate_content(prompt)
             script = response.text.strip()
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Gemini 대본 생성 오류: {str(e)}")
+            return {"success": False, "detail": f"Gemini 대본 생성 오류: {str(e)}"}
 
         audio_path = "/tmp/narration.mp3"
         try:
             communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
             await communicate.save(audio_path)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Edge-TTS 음성 생성 오류: {str(e)}")
+            return {"success": False, "detail": f"Edge-TTS 음성 생성 오류: {str(e)}"}
 
         img_path = "/tmp/thumb.jpg"
         download_product_image(meta_info.get("img_url"), img_path)
@@ -233,7 +234,7 @@ async def run_pipeline(req: PipelineRequest):
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, make_stable_video, audio_path, img_path, video_path)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"MoviePy 영상 인코딩 오류: {str(e)}")
+            return {"success": False, "detail": f"MoviePy 영상 인코딩 오류: {str(e)}"}
 
         return {
             "success": True,
@@ -243,16 +244,14 @@ async def run_pipeline(req: PipelineRequest):
             "video_url": "https://toss-automation-backend.onrender.com/download-video",
             "image_url": "https://toss-automation-backend.onrender.com/download-image"
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"서버 파이프라인 에러: {str(e)}")
+        return {"success": False, "detail": f"서버 파이프라인 에러: {str(e)}"}
 
 @app.post("/generate-blog")
 async def generate_blog(req: PipelineRequest):
     try:
         if not GEMINI_KEY:
-            raise HTTPException(status_code=500, detail="GEMINI_API_KEY 설정이 누락되었습니다.")
+            return {"success": False, "detail": "GEMINI_API_KEY 설정이 누락되었습니다."}
 
         meta_info = parse_toss_meta(req.product_url)
         product_title = meta_info.get("title") or "토스 핫딜 추천 상품"
@@ -263,7 +262,7 @@ async def generate_blog(req: PipelineRequest):
             response = model.generate_content(prompt)
             blog_post = response.text.strip()
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Gemini 블로그 원고 생성 오류: {str(e)}")
+            return {"success": False, "detail": f"Gemini 블로그 원고 생성 오류: {str(e)}"}
 
         img_path = "/tmp/thumb.jpg"
         download_product_image(meta_info.get("img_url"), img_path)
@@ -275,7 +274,5 @@ async def generate_blog(req: PipelineRequest):
             "share_link": req.product_url,
             "image_url": "https://toss-automation-backend.onrender.com/download-image"
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"블로그 파이프라인 에러: {str(e)}")
+        return {"success": False, "detail": f"블로그 파이프라인 에러: {str(e)}"}
