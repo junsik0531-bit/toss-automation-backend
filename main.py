@@ -4,6 +4,7 @@ import asyncio
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from PIL import Image, ImageDraw, ImageFont
 
+# 최신 Pillow 버전과 MoviePy 간 ANTIALIAS 호환성 패치
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
@@ -15,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip, TextClip, ConcatenateVideoClip
+from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip, ConcatenateVideoClip
 
 app = FastAPI()
 
@@ -98,14 +99,14 @@ def parse_toss_meta(url: str):
         desc = og_desc["content"].strip() if og_desc and og_desc.get("content") else "토스 파트너스 추천 상품"
 
         return {
-            "title": title if title and title != "토스" else None,
+            "title": title if title and title != "토스" else "토스 파트너스 추천 상품",
             "desc": desc,
             "img_url": img_url,
             "real_url": res.url
         }
     except Exception:
         return {
-            "title": None,
+            "title": "토스 파트너스 추천 상품",
             "desc": "토스 파트너스 추천 상품",
             "img_url": None,
             "real_url": url
@@ -113,43 +114,46 @@ def parse_toss_meta(url: str):
 
 @app.get("/")
 def home():
-    return {"status": "Multi-Image & Subtitle Shorts Generator is running"}
+    return {"status": "Stable Toss AutoFlow Backend is running"}
 
 @app.post("/parse-custom-link")
 async def parse_custom_link(req: PipelineRequest):
-    share_url = build_toss_user_link(req.product_url)
-    meta = parse_toss_meta(share_url)
-    product_name = meta.get("title") or "토스 핫딜 추천 상품"
-    features = generate_3_features(product_name, meta.get("desc", ""))
+    try:
+        share_url = build_toss_user_link(req.product_url)
+        meta = parse_toss_meta(share_url)
+        product_name = meta.get("title") or "토스 핫딜 추천 상품"
+        features = generate_3_features(product_name, meta.get("desc", ""))
 
-    return {
-        "success": True,
-        "item": {
-            "id": f"custom_{int(asyncio.get_event_loop().time())}",
-            "name": product_name,
-            "features": features,
-            "usage": meta.get("desc", "토스 파트너스 추천 상품"),
-            "share_link": share_url,
-            "img_url": meta.get("img_url"),
-            "date": "2026-09-28",
-            "reels": False, "shorts": False, "blog": False
+        return {
+            "success": True,
+            "item": {
+                "id": f"custom_{int(asyncio.get_event_loop().time())}",
+                "name": product_name,
+                "features": features,
+                "usage": meta.get("desc", "토스 파트너스 추천 상품"),
+                "share_link": share_url,
+                "img_url": meta.get("img_url"),
+                "date": "2026-09-28",
+                "reels": False, "shorts": False, "blog": False
+            }
         }
-    }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/fetch-trending-items")
 async def fetch_trending_items():
-    active_sample_links = [
-        "https://toss.shopping/_m/pPn2t5qo",
-        "https://toss.shopping/_m/J61l5Lsj",
-        "https://toss.shopping/_m/x8K2m1Lz"
-    ]
-    items = []
-    for idx, raw_link in enumerate(active_sample_links, 1):
-        share_url = build_toss_user_link(raw_link)
-        meta_info = parse_toss_meta(share_url)
-        product_name = meta_info.get("title")
-        
-        if product_name:
+    try:
+        active_sample_links = [
+            "https://toss.shopping/_m/pPn2t5qo",
+            "https://toss.shopping/_m/J61l5Lsj",
+            "https://toss.shopping/_m/x8K2m1Lz"
+        ]
+        items = []
+        for idx, raw_link in enumerate(active_sample_links, 1):
+            share_url = build_toss_user_link(raw_link)
+            meta_info = parse_toss_meta(share_url)
+            product_name = meta_info.get("title") or f"토스 추천 핫딜 {idx}호"
+            
             features = generate_3_features(product_name, meta_info.get("desc", ""))
             items.append({
                 "id": f"item_0{idx}",
@@ -162,7 +166,9 @@ async def fetch_trending_items():
                 "reels": False, "shorts": False, "blog": False
             })
 
-    return {"success": True, "items": items}
+        return {"success": True, "items": items}
+    except Exception as e:
+        return {"success": False, "items": [], "detail": str(e)}
 
 @app.get("/download-video")
 def download_video():
@@ -195,13 +201,10 @@ def download_product_image(img_url: str, save_path: str):
     img.save(save_path)
     return False
 
-def create_feature_card_image(title_text: str, bg_color=(25, 31, 40), text_color=(255, 255, 255), save_path="/tmp/card.jpg"):
+def create_title_card_image(title_text: str, bg_color=(25, 31, 40), text_color=(255, 255, 255), save_path="/tmp/card.jpg"):
     img = Image.new('RGB', (720, 720), color=bg_color)
     draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 42)
-    except Exception:
-        font = ImageFont.load_default()
+    font = ImageFont.load_default()
     
     bbox = draw.textbbox((0, 0), title_text, font=font)
     w = bbox[2] - bbox[0]
@@ -209,54 +212,32 @@ def create_feature_card_image(title_text: str, bg_color=(25, 31, 40), text_color
     draw.text(((720 - w) / 2, (720 - h) / 2), title_text, fill=text_color, font=font)
     img.save(save_path)
 
-def make_multi_image_video_with_subtitles(audio_path: str, img_path: str, product_title: str, script: str, features: list, output_path: str):
+def make_stable_video(audio_path: str, img_path: str, output_path: str):
     audio_clip = AudioFileClip(audio_path)
     duration = audio_clip.duration
 
-    # 다채로운 이미지를 연출하기 위한 카드 3장 생성
+    # 안정적인 3단계 화면 구성 (원본 이미지 ➔ 하이라이트 1 ➔ 하이라이트 2)
     card1_path = "/tmp/card1.jpg"
     card2_path = "/tmp/card2.jpg"
-    feat_text1 = features[0] if len(features) > 0 else "강력 추천 포인트 01"
-    feat_text2 = features[1] if len(features) > 1 else "압도적 가성비 구성"
     
-    create_feature_card_image(f"🔥 {feat_text1}", bg_color=(49, 130, 246), save_path=card1_path)
-    create_feature_card_image(f"✨ {feat_text2}", bg_color=(19, 115, 51), save_path=card2_path)
+    create_title_card_image("HOT DEAL SPECIAL", bg_color=(49, 130, 246), save_path=card1_path)
+    create_title_card_image("CHECK OUT TOSS SHOPPING", bg_color=(19, 115, 51), save_path=card2_path)
 
-    clip_duration = duration / 3.0
+    clip_dur = duration / 3.0
 
-    # 이미지 슬라이드 3개 조합 (원본 이미지 + 특징 카드1 + 특징 카드2)
-    c1 = ImageClip(img_path).set_duration(clip_duration).resize(width=720).set_position("center")
-    c2 = ImageClip(card1_path).set_duration(clip_duration).resize(width=720).set_position("center")
-    c3 = ImageClip(card2_path).set_duration(clip_duration).resize(width=720).set_position("center")
+    c1 = ImageClip(img_path).set_duration(clip_dur).resize(width=720).set_position("center")
+    c2 = ImageClip(card1_path).set_duration(clip_dur).resize(width=720).set_position("center")
+    c3 = ImageClip(card2_path).set_duration(clip_dur).resize(width=720).set_position("center")
 
-    bg1 = ImageClip(img_path).resize((720, 1280)).set_duration(clip_duration)
-    bg2 = ImageClip(card1_path).resize((720, 1280)).set_duration(clip_duration)
-    bg3 = ImageClip(card2_path).resize((720, 1280)).set_duration(clip_duration)
+    bg1 = ImageClip(img_path).resize((720, 1280)).set_duration(clip_dur)
+    bg2 = ImageClip(card1_path).resize((720, 1280)).set_duration(clip_dur)
+    bg3 = ImageClip(card2_path).resize((720, 1280)).set_duration(clip_dur)
 
     v1 = CompositeVideoClip([bg1, c1])
     v2 = CompositeVideoClip([bg2, c2])
     v3 = CompositeVideoClip([bg3, c3])
 
-    video_concat = ConcatenateVideoClip([v1, v2, v3]).set_audio(audio_clip)
-
-    # 하단 자막 텍스트 오버레이 카드 추가
-    sub_card_path = "/tmp/sub_card.png"
-    sub_img = Image.new('RGBA', (680, 120), color=(0, 0, 0, 180))
-    sub_draw = ImageDraw.Draw(sub_img)
-    try:
-        sub_font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 28)
-    except Exception:
-        sub_font = ImageFont.load_default()
-
-    short_script = script[:25] + "..." if len(script) > 25 else script
-    bbox = sub_draw.textbbox((0, 0), short_script, font=sub_font)
-    sw = bbox[2] - bbox[0]
-    sh = bbox[3] - bbox[1]
-    sub_draw.text(((680 - sw) / 2, (120 - sh) / 2), short_script, fill=(255, 255, 0), font=sub_font)
-    sub_img.save(sub_card_path)
-
-    sub_clip = ImageClip(sub_card_path).set_duration(duration).set_position(("center", 1000))
-    final_video = CompositeVideoClip([video_concat, sub_clip])
+    final_video = ConcatenateVideoClip([v1, v2, v3]).set_audio(audio_clip)
 
     final_video.write_videofile(
         output_path,
@@ -276,7 +257,6 @@ async def run_pipeline(req: PipelineRequest):
 
         meta_info = parse_toss_meta(req.product_url)
         product_title = meta_info.get("title") or "토스 핫딜 추천 상품"
-        features = generate_3_features(product_title, meta_info.get("desc", ""))
 
         model = genai.GenerativeModel('gemini-3.6-flash')
         prompt = f"상품명: '{product_title}' (구매 링크: {req.product_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘. 설명 없이 오직 읽을 대본 문장만 출력해줘."
@@ -292,7 +272,7 @@ async def run_pipeline(req: PipelineRequest):
 
         video_path = "/tmp/output_shorts.mp4"
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, make_multi_image_video_with_subtitles, audio_path, img_path, product_title, script, features, video_path)
+        await loop.run_in_executor(None, make_stable_video, audio_path, img_path, video_path)
 
         return {
             "success": True,
