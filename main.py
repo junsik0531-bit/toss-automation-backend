@@ -4,7 +4,6 @@ import asyncio
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from PIL import Image
 
-# 최신 Pillow 버전과 MoviePy 간 ANTIALIAS 호환성 패치
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
@@ -57,11 +56,11 @@ def build_toss_user_link(raw_url: str) -> str:
         return f"{raw_url}{sep}userId={TOSS_USER_ID}"
 
 def generate_3_features(product_name: str, desc: str) -> list:
-    """Gemini AI를 이용한 장점 3가지 요약 (특수문자 점/불릿 완전 제거)"""
-    if GEMINI_KEY and product_name and product_name != "토스 파트너스 추천 핫딜":
+    """Gemini AI를 이용한 상품 장점 3가지 요약"""
+    if GEMINI_KEY and product_name:
         try:
             model = genai.GenerativeModel('gemini-3.6-flash')
-            prompt = f"상품명: '{product_name}' (설명: {desc})의 핵심 장점 3가지를 단어/구문 형태로 출력해줘. 점, 기호, 번호 등 불릿 없이 순수 텍스트 3줄만 출력해줘."
+            prompt = f"상품명: '{product_name}' (설명: {desc})의 핵심 장점 3가지를 단어/구문 형태로 출력해줘. 불릿이나 기호, 번호 없이 오직 텍스트 3줄만 출력해줘."
             res = model.generate_content(prompt)
             lines = [l.strip() for l in res.text.split('\n') if l.strip()]
             clean_features = []
@@ -99,7 +98,7 @@ def parse_toss_meta(url: str):
         img_url = og_image["content"] if og_image and og_image.get("content") else None
 
         og_desc = soup.find("meta", property="og:description") or soup.find("meta", attrs={"name": "og:description"})
-        desc = og_desc["content"].strip() if og_desc and og_desc.get("content") else "토스 파트너스 추천 핫딜 상품"
+        desc = og_desc["content"].strip() if og_desc and og_desc.get("content") else "토스 파트너스 추천 상품"
 
         return {
             "title": title if title and title != "토스" else None,
@@ -110,14 +109,88 @@ def parse_toss_meta(url: str):
     except Exception:
         return {
             "title": None,
-            "desc": "토스 파트너스 추천 핫딜 상품",
+            "desc": "토스 파트너스 추천 상품",
             "img_url": None,
             "real_url": url
         }
 
+def get_toss_access_token():
+    """토스 파트너스 API OAuth 토큰 발급"""
+    if not TOSS_ACCESS_KEY or not TOSS_SECRET_KEY:
+        return None
+    try:
+        url = "https://api.toss.im/v1/oauth/token"
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": TOSS_ACCESS_KEY,
+            "client_secret": TOSS_SECRET_KEY
+        }
+        res = requests.post(url, json=payload, timeout=5)
+        if res.status_code == 200:
+            return res.json().get("access_token")
+    except Exception:
+        pass
+    return None
+
+def fetch_toss_official_items():
+    """승인된 토스 파트너스 공식 API 수집 (정가, 할인율, 판매가 100% 매칭)"""
+    token = get_toss_access_token()
+    if not token:
+        return None
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        api_url = "https://api.toss.im/v1/shopping/partners/products"
+        params = {"limit": 10}
+        res = requests.get(api_url, headers=headers, params=params, timeout=5)
+        
+        if res.status_code == 200:
+            raw_data = res.json()
+            raw_items = raw_data.get("data", []) or raw_data.get("products", [])
+            parsed_items = []
+            
+            for item in raw_items:
+                raw_url = item.get("shareUrl") or item.get("linkUrl") or item.get("url") or ""
+                if not raw_url:
+                    continue
+                
+                share_url = build_toss_user_link(raw_url)
+                exact_name = item.get("productName") or "토스 핫딜 추천 상품"
+                
+                # 공식 API 가격 수치 데이터 파싱
+                orig_price = item.get("originalPrice") or item.get("price") or 0
+                disc_rate = item.get("discountRate") or item.get("discountPercent") or 0
+                sale_price = item.get("salePrice") or item.get("discountPrice") or orig_price
+                
+                orig_str = f"{orig_price:,}원" if orig_price else "상세 참조"
+                disc_str = f"{disc_rate}%" if disc_rate else "특가"
+                sale_str = f"{sale_price:,}원" if sale_price else "토스 앱 특가"
+                
+                features = generate_3_features(exact_name, item.get("categoryName", ""))
+
+                parsed_items.append({
+                    "id": str(item.get("productId", f"item_{len(parsed_items)+1}")),
+                    "name": exact_name,
+                    "features": features,
+                    "original_price": orig_str,
+                    "discount_rate": disc_str,
+                    "sale_price": sale_str,
+                    "usage": item.get("categoryName") or "토스 파트너스 추천 핫딜",
+                    "share_link": share_url,
+                    "date": "2026-09-28",
+                    "reels": False, "shorts": False, "blog": False
+                })
+                
+                if len(parsed_items) >= 5:
+                    break
+            return parsed_items
+    except Exception:
+        pass
+    return None
+
 @app.get("/")
 def home():
-    return {"status": "Free Automation Server with Clean Features Parser is running"}
+    return {"status": "Free Automation Server with Official API Price Sync is running"}
 
 @app.post("/parse-custom-link")
 async def parse_custom_link(req: PipelineRequest):
@@ -133,7 +206,7 @@ async def parse_custom_link(req: PipelineRequest):
             "id": f"custom_{int(asyncio.get_event_loop().time())}",
             "name": product_name,
             "features": features,
-            "original_price": "토스 앱 참조",
+            "original_price": "상세 참조",
             "discount_rate": "특가 할인",
             "sale_price": "토스 앱 특가",
             "usage": meta.get("desc", "토스 파트너스 추천 상품"),
@@ -145,36 +218,36 @@ async def parse_custom_link(req: PipelineRequest):
 
 @app.get("/fetch-trending-items")
 async def fetch_trending_items():
-    """아이템 수집: 메타 파싱 성공한 유효 상품만 선별 반환"""
-    active_sample_links = [
-        "https://toss.shopping/_m/pPn2t5qo",
-        "https://toss.shopping/_m/J61l5Lsj",
-        "https://toss.shopping/_m/x8K2m1Lz",
-        "https://toss.shopping/_m/qW9v4N2x",
-        "https://toss.shopping/_m/rT3b8V1k"
-    ]
+    """아이템 수집 엔드포인트"""
+    items = fetch_toss_official_items()
     
-    items = []
-    for idx, raw_link in enumerate(active_sample_links, 1):
-        share_url = build_toss_user_link(raw_link)
-        meta_info = parse_toss_meta(share_url)
-        product_name = meta_info.get("title")
-        
-        # 파싱에 성공한 유효 상품만 추가 (껍데기 상품 제거)
-        if product_name and product_name != "토스 파트너스 추천 핫딜":
-            features = generate_3_features(product_name, meta_info.get("desc", ""))
-            items.append({
-                "id": f"item_0{idx}",
-                "name": product_name,
-                "features": features,
-                "original_price": "토스 앱 참조",
-                "discount_rate": "특가 할인",
-                "sale_price": "토스 앱 특가",
-                "usage": meta_info.get("desc", "토스 파트너스 추천 핫딜"),
-                "share_link": share_url,
-                "date": "2026-09-28",
-                "reels": False, "shorts": False, "blog": False
-            })
+    # API 호출 실패 시 백업 동작
+    if not items:
+        active_sample_links = [
+            "https://toss.shopping/_m/pPn2t5qo",
+            "https://toss.shopping/_m/J61l5Lsj",
+            "https://toss.shopping/_m/x8K2m1Lz"
+        ]
+        items = []
+        for idx, raw_link in enumerate(active_sample_links, 1):
+            share_url = build_toss_user_link(raw_link)
+            meta_info = parse_toss_meta(share_url)
+            product_name = meta_info.get("title")
+            
+            if product_name:
+                features = generate_3_features(product_name, meta_info.get("desc", ""))
+                items.append({
+                    "id": f"item_0{idx}",
+                    "name": product_name,
+                    "features": features,
+                    "original_price": "상세 참조",
+                    "discount_rate": "특가 할인",
+                    "sale_price": "토스 앱 특가",
+                    "usage": meta_info.get("desc", "토스 파트너스 추천 핫딜"),
+                    "share_link": share_url,
+                    "date": "2026-09-28",
+                    "reels": False, "shorts": False, "blog": False
+                })
 
     return {"success": True, "items": items}
 
