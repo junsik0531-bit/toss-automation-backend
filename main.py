@@ -2,24 +2,21 @@ import os
 import re
 import asyncio
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
 import google.generativeai as genai
-import edge_tts
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip, ConcatenateVideoClip
 
 app = FastAPI()
 
-# CORS 완벽 허용
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -119,7 +116,7 @@ def parse_toss_meta(url: str):
 
 @app.get("/")
 def home():
-    return {"status": "Product Management Automation Pipeline Backend is running"}
+    return {"status": "Ultra Fast Stable Toss Pipeline Backend is running"}
 
 @app.post("/parse-custom-link")
 async def parse_custom_link(req: PipelineRequest):
@@ -145,13 +142,6 @@ async def parse_custom_link(req: PipelineRequest):
     except Exception as e:
         return {"success": False, "detail": f"파싱 에러: {str(e)}"}
 
-@app.get("/download-video")
-def download_video():
-    video_path = "/tmp/output_shorts.mp4"
-    if os.path.exists(video_path):
-        return FileResponse(video_path, media_type="video/mp4", filename="toss_shorts.mp4")
-    raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
-
 @app.get("/download-image")
 def download_image():
     img_path = "/tmp/thumb.jpg"
@@ -176,32 +166,6 @@ def download_product_image(img_url: str, save_path: str):
     img.save(save_path)
     return False
 
-def make_stable_video(audio_path: str, img_path: str, output_path: str):
-    audio_clip = AudioFileClip(audio_path)
-    duration = audio_clip.duration
-
-    clip_dur = duration / 2.0
-
-    c1 = ImageClip(img_path).set_duration(clip_dur).resize(width=720).set_position("center")
-    bg1 = ImageClip(img_path).resize((720, 1280)).set_duration(clip_dur)
-    v1 = CompositeVideoClip([bg1, c1])
-
-    c2 = ImageClip(img_path).set_duration(clip_dur).resize(width=680).set_position("center")
-    bg2 = ImageClip(img_path).resize((720, 1280)).set_duration(clip_dur)
-    v2 = CompositeVideoClip([bg2, c2])
-
-    final_video = ConcatenateVideoClip([v1, v2]).set_audio(audio_clip)
-
-    final_video.write_videofile(
-        output_path,
-        fps=15,
-        codec="libx264",
-        audio_codec="aac",
-        preset="ultrafast",
-        threads=1,
-        logger=None
-    )
-
 @app.post("/run-pipeline")
 async def run_pipeline(req: PipelineRequest):
     try:
@@ -219,29 +183,14 @@ async def run_pipeline(req: PipelineRequest):
         except Exception as e:
             return {"success": False, "detail": f"Gemini 대본 생성 오류: {str(e)}"}
 
-        audio_path = "/tmp/narration.mp3"
-        try:
-            communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
-            await communicate.save(audio_path)
-        except Exception as e:
-            return {"success": False, "detail": f"Edge-TTS 음성 생성 오류: {str(e)}"}
-
         img_path = "/tmp/thumb.jpg"
         download_product_image(meta_info.get("img_url"), img_path)
-
-        video_path = "/tmp/output_shorts.mp4"
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, make_stable_video, audio_path, img_path, video_path)
-        except Exception as e:
-            return {"success": False, "detail": f"MoviePy 영상 인코딩 오류: {str(e)}"}
 
         return {
             "success": True,
             "product_name": product_title,
             "script": script,
             "share_link": req.product_url,
-            "video_url": "https://toss-automation-backend.onrender.com/download-video",
             "image_url": "https://toss-automation-backend.onrender.com/download-image"
         }
     except Exception as e:
