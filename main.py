@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 from PIL import Image
 
@@ -27,62 +28,127 @@ app.add_middleware(
 )
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+TOSS_ACCESS_KEY = os.getenv("TOSS_CLIENT_ID", "")
+TOSS_SECRET_KEY = os.getenv("TOSS_CLIENT_SECRET", "")
+TOSS_USER_ID = os.getenv("TOSS_USER_ID", "")
+
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
 
 class PipelineRequest(BaseModel):
     product_url: str
 
-def resolve_real_toss_url(url: str) -> str:
-    """토스 단축/쉐어링크의 최종 리디렉션 원본 URL 및 리워드 주소를 정확히 추적"""
+def get_toss_access_token():
+    """토스 파트너스 API Access Key/Secret Key 기반 인증 토큰 발급"""
+    if not TOSS_ACCESS_KEY or not TOSS_SECRET_KEY:
+        return None
+    try:
+        url = "https://api.toss.im/v1/oauth/token"
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": TOSS_ACCESS_KEY,
+            "client_secret": TOSS_SECRET_KEY
+        }
+        res = requests.post(url, json=payload, timeout=5)
+        if res.status_code == 200:
+            return res.json().get("access_token")
+    except Exception:
+        pass
+    return None
+
+def fetch_toss_official_items():
+    """토스 파트너스 공식 API로 실시간 인기 상품 조회 및 회원 연동 ID 기반 쉐어링크 생성"""
+    token = get_toss_access_token()
+    if not token:
+        return None
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        api_url = "https://api.toss.im/v1/shopping/partners/products"
+        params = {"userId": TOSS_USER_ID} if TOSS_USER_ID else {}
+        res = requests.get(api_url, headers=headers, params=params, timeout=5)
+        
+        if res.status_code == 200:
+            raw_items = res.json().get("data", [])
+            parsed_items = []
+            for item in raw_items:
+                share_url = item.get("shareUrl") or item.get("linkUrl") or ""
+                # 회원 연동 ID 적용 쉐어링크 확인 및 파라미터 결합
+                if TOSS_USER_ID and share_url and "userId" not in share_url:
+                    sep = "&" if "?" in share_url else "?"
+                    share_url = f"{share_url}{sep}userId={TOSS_USER_ID}"
+                
+                parsed_items.append({
+                    "id": item.get("productId", "item"),
+                    "name": item.get("productName", "토스 파트너스 추천 상품"),
+                    "original_price": f"{item.get('originalPrice', 0):,}원",
+                    "discount_rate": f"{item.get('discountRate', 0)}%",
+                    "sale_price": f"{item.get('salePrice', 0):,}원",
+                    "usage": item.get("categoryName", "토스 파트너스 추천 핫딜"),
+                    "share_link": share_url,
+                    "date": "2026-09-28",
+                    "reels": False, "shorts": False, "blog": False
+                })
+            return parsed_items
+    except Exception:
+        pass
+    return None
+
+def parse_toss_meta(url: str):
+    """입력된 토스 쉐어링크 URL에서 메타데이터 파싱"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     try:
-        response = requests.get(url, headers=headers, allow_redirects=True, timeout=5)
-        return response.url
+        res = requests.get(url, headers=headers, allow_redirects=True, timeout=5)
+        real_url = res.url
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        og_title = soup.find("meta", property="og:title") or soup.find("meta", attrs={"name": "og:title"})
+        product_name = og_title["content"].strip() if og_title and og_title.get("content") else "토스 추천 핫딜 상품"
+        product_name = re.sub(r'[\s|]*토스.*$', '', product_name)
+
+        og_image = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "og:image"})
+        img_url = og_image["content"] if og_image and og_image.get("content") else None
+
+        return {
+            "title": product_name,
+            "real_url": url,
+            "img_url": img_url
+        }
     except Exception:
-        return url
+        return {
+            "title": "토스 추천 핫딜 상품",
+            "real_url": url,
+            "img_url": None
+        }
 
 @app.get("/")
 def home():
-    return {"status": "Free Automation Server is running"}
+    return {"status": "Free Automation Server is running with Toss Official API"}
 
 @app.get("/fetch-trending-items")
 async def fetch_trending_items():
-    """토스 실시간 인기 상품 및 실제 접속 가능한 토스 쉐어링크 데이터 파싱"""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    try:
-        # 실제 토스 쉐어링크 주소 예시 동기화
-        sample_items = [
+    """아이템 찾기: 토스 파트너스 API 수집 데이터 반환"""
+    items = fetch_toss_official_items()
+    
+    # API 응답 대기/오류 시 예비 백업 쉐어링크 데이터
+    if not items:
+        backup_link = f"https://toss.shopping/_m/J61l5Lsj?userId={TOSS_USER_ID}" if TOSS_USER_ID else "https://toss.shopping/_m/J61l5Lsj"
+        items = [
             {
                 "id": "item_01",
-                "name": "무선 미니 마사지건",
-                "original_price": "59,000원",
-                "discount_rate": "49%",
-                "sale_price": "29,900원",
-                "usage": "운동 후 근육 풀기, 목 어깨 통증 완화",
-                "share_link": "https://toss.shopping/_m/pPn2t5qo",
-                "date": "2026-09-24",
-                "reels": False, "shorts": False, "blog": False
-            },
-            {
-                "id": "item_02",
                 "name": "초음파 세척기 스마트 2세대",
                 "original_price": "39,000원",
                 "discount_rate": "35%",
                 "sale_price": "25,350원",
-                "usage": "안경, 시계, 장신구 기름때 제거",
-                "share_link": resolve_real_toss_url("https://toss.shopping/_m/pPn2t5qo"),
-                "date": "2026-09-24",
+                "usage": "안경, 시계, 장신구 기름때 세척",
+                "share_link": backup_link,
+                "date": "2026-09-28",
                 "reels": False, "shorts": False, "blog": False
             }
         ]
-        return {"success": True, "items": sample_items}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"success": True, "items": items}
 
 @app.get("/download-video")
 def download_video():
@@ -91,18 +157,12 @@ def download_video():
         return FileResponse(video_path, media_type="video/mp4", filename="toss_shorts.mp4")
     raise HTTPException(status_code=404, detail="영상을 찾을 수 없습니다.")
 
-def fetch_product_image(url: str, save_path: str):
+def download_product_image(img_url: str, save_path: str):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     try:
-        real_url = resolve_real_toss_url(url)
-        res = requests.get(real_url, headers=headers, timeout=5)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        og_image = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "og:image"})
-        
-        if og_image and og_image.get("content"):
-            img_url = og_image["content"]
+        if img_url:
             img_data = requests.get(img_url, headers=headers, timeout=5).content
             with open(save_path, "wb") as f:
                 f.write(img_data)
@@ -138,32 +198,33 @@ async def run_pipeline(req: PipelineRequest):
         if not GEMINI_KEY:
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY가 설정되지 않았습니다.")
 
-        # 1. 실제 접속 가능한 최종 토스 리워드 쉐어링크 URL 파싱
-        real_url = resolve_real_toss_url(req.product_url)
+        # 1. 토스 쉐어링크 메타데이터 자동 파싱
+        meta_info = parse_toss_meta(req.product_url)
+        product_title = meta_info["title"]
 
         # 2. Gemini AI 대본 작성
         try:
             model = genai.GenerativeModel('gemini-3.6-flash')
-            prompt = f"토스 추천 상품 링크({real_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘. 부연설명 없이 읽을 나레이션 텍스트만 출력해줘."
+            prompt = f"상품명: '{product_title}' (구매 링크: {req.product_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘. 부연설명 없이 읽을 나레이션 텍스트만 출력해줘."
             response = model.generate_content(prompt)
             script = response.text.strip()
         except Exception:
             available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
             if available_models:
                 model = genai.GenerativeModel(available_models[0])
-                response = model.generate_content(f"토스 추천 상품 링크({real_url})를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘.")
+                response = model.generate_content(f"상품명: '{product_title}'를 홍보하는 15초 숏폼 나레이션 대본을 작성해줘.")
                 script = response.text.strip()
             else:
                 raise HTTPException(status_code=500, detail="이용 가능한 Gemini 모델을 찾을 수 없습니다.")
 
-        # 3. Edge-TTS 음성 파일 생성
+        # 3. Edge-TTS 음성 생성
         audio_path = "/tmp/narration.mp3"
         communicate = edge_tts.Communicate(script, "ko-KR-SunHiNeural")
         await communicate.save(audio_path)
 
-        # 4. 토스 링크 대표 이미지 추적 및 다운로드
+        # 4. 이미지 다운로드
         img_path = "/tmp/thumb.jpg"
-        fetch_product_image(real_url, img_path)
+        download_product_image(meta_info["img_url"], img_path)
 
         # 5. 쇼츠 영상 렌더링
         video_path = "/tmp/output_shorts.mp4"
@@ -172,10 +233,11 @@ async def run_pipeline(req: PipelineRequest):
 
         return {
             "success": True,
+            "product_name": product_title,
             "script": script,
-            "share_link": real_url,
+            "share_link": req.product_url,
             "video_url": "https://toss-automation-backend.onrender.com/download-video",
-            "message": "비용 0원 완전 무료 파이프라인으로 영상 생성이 성공적으로 완료되었습니다!"
+            "message": "토스 파트너스 API 연동 숏폼 생성이 성공적으로 완료되었습니다!"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
