@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>토스 커머스 자동화 파이프라인 대시보드</title>
+    <style>
+        :root {
+            --primary: #3182f6;
+            --primary-hover: #1b64da;
+            --bg-gray: #f5f6f8;
+            --sidebar-bg: #ffffff;
+            --text-main: #191f28;
+            --text-sub: #8b95a1;
+            --border-color: #e5e8eb;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            background-color: var(--bg-gray); 
+            color: var(--text-main); 
+            display: flex; 
+            height: 100vh; 
+            overflow: hidden; 
+        }
+
+        .sidebar { 
+            width: 240px; 
+            background-color: var(--sidebar-bg); 
+            border-right: 1px solid var(--border-color); 
+            display: flex; 
+            flex-direction: column; 
+            padding: 20px 0; 
+            flex-shrink: 0;
+        }
+        .sidebar .logo { 
+            font-size: 18px; 
+            font-weight: bold; 
+            padding: 0 20px 20px; 
+            color: var(--primary); 
+            border-bottom: 1px solid var(--border-color); 
+        }
+        .menu-list { list-style: none; margin-top: 10px; }
+        .menu-item { 
+            padding: 14px 20px; 
+            font-size: 15px; 
+            font-weight: 500; 
+            color: #4e5968; 
+            cursor: pointer; 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+            transition: 0.2s; 
+            white-space: nowrap;
+        }
+        .menu-item:hover, .menu-item.active { 
+            background-color: #e8f3ff; 
+            color: var(--primary); 
+            font-weight: bold; 
+        }
+
+        .main-content { 
+            flex: 1; 
+            padding: 30px; 
+            overflow-y: auto; 
+            -webkit-overflow-scrolling: touch;
+        }
+        .section { display: none; }
+        .section.active { display: block; }
+        .page-title { font-size: 22px; font-weight: bold; margin-bottom: 20px; }
+
+        .card { 
+            background: white; 
+            border-radius: 16px; 
+            padding: 24px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
+            margin-bottom: 20px; 
+        }
+        
+        .filter-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+        select, input[type="text"] { 
+            padding: 12px 14px; 
+            border: 1px solid var(--border-color); 
+            border-radius: 8px; 
+            font-size: 14px; 
+        }
+        input[type="text"] { flex: 1; min-width: 150px; }
+        button.btn-primary { 
+            padding: 12px 20px; 
+            background-color: var(--primary); 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            font-size: 14px;
+            min-height: 44px;
+            white-space: nowrap;
+        }
+        button.btn-primary:hover { background-color: var(--primary-hover); }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: #fff;
+        }
+
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            text-align: left; 
+            font-size: 13px; 
+            min-width: 960px; 
+        }
+        th, td { 
+            padding: 12px 10px; 
+            border-bottom: 1px solid var(--border-color); 
+            vertical-align: middle; 
+        }
+        th { 
+            background-color: #f9fafb; 
+            color: var(--text-sub); 
+            font-weight: 600; 
+            white-space: nowrap; 
+            text-align: center;
+        }
+        th:nth-child(1), td:nth-child(1) { text-align: left; }
+        th:nth-child(2), td:nth-child(2) { text-align: left; }
+
+        .badge { 
+            display: inline-block;
+            padding: 6px 10px; 
+            border-radius: 6px; 
+            font-size: 12px; 
+            font-weight: bold; 
+            white-space: nowrap; 
+            text-align: center;
+            min-width: 52px;
+        }
+        .badge-done { background-color: #e6f4ea; color: #137333; }
+        .badge-none { background-color: #fce8e6; color: #c5221f; }
+        
+        .link-text { 
+            color: var(--primary); 
+            text-decoration: none; 
+            font-weight: 500; 
+            white-space: nowrap;
+            display: inline-block;
+        }
+        .link-text:hover { text-decoration: underline; }
+
+        .features-list { padding-left: 0; margin: 0; line-height: 1.6; color: #333; list-style: none; }
+        .features-list li { margin-bottom: 4px; position: relative; padding-left: 14px; word-break: keep-all; }
+        .features-list li::before { content: "•"; position: absolute; left: 0; color: var(--primary); font-weight: bold; }
+
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-weight: bold; margin-bottom: 8px; font-size: 14px; }
+        .form-group select, .form-group input { width: 100%; }
+        
+        .output-box { 
+            margin-top: 16px; 
+            padding: 16px; 
+            background: #f9fafb; 
+            border-radius: 8px; 
+            border: 1px solid var(--border-color); 
+            font-size: 14px; 
+            line-height: 1.6; 
+            white-space: pre-wrap; 
+            word-break: break-all;
+        }
+
+        .btn-download {
+            display: inline-block;
+            margin-top: 10px;
+            margin-right: 8px;
+            padding: 10px 16px;
+            background-color: #00c73c;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .btn-delete {
+            padding: 6px 12px;
+            background-color: #ff4d4f;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .blog-img-preview {
+            max-width: 200px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: block;
+            border: 1px solid var(--border-color);
+        }
+
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .sidebar { 
+                width: 100%; 
+                height: auto; 
+                padding: 12px 0 0 0; 
+                border-right: none; 
+                border-bottom: 1px solid var(--border-color); 
+            }
+            .sidebar .logo { 
+                padding: 0 16px 10px; 
+                font-size: 16px; 
+                border-bottom: none; 
+            }
+            .menu-list { 
+                display: flex; 
+                overflow-x: auto; 
+                margin-top: 0; 
+                padding: 0 10px; 
+                -webkit-overflow-scrolling: touch; 
+            }
+            .menu-list::-webkit-scrollbar { display: none; }
+            .menu-item { 
+                padding: 10px 14px; 
+                font-size: 14px; 
+                border-bottom: 2px solid transparent; 
+                border-radius: 0; 
+            }
+            .menu-item.active { 
+                background-color: transparent; 
+                border-bottom: 2px solid var(--primary); 
+            }
+
+            .main-content { padding: 16px; }
+            .card { padding: 16px; border-radius: 12px; }
+            .page-title { font-size: 18px; margin-bottom: 14px; }
+            
+            .filter-bar { flex-direction: column; align-items: stretch; }
+            .filter-bar select, .filter-bar input, .filter-bar button { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="logo">🚀 Toss AutoFlow</div>
+        <ul class="menu-list">
+            <li class="menu-item active" onclick="switchTab(event, 'all-auto')">⚡ 전체 자동화</li>
+            <li class="menu-item" onclick="switchTab(event, 'item-manage')">📦 상품 관리</li>
+            <li class="menu-item" onclick="switchTab(event, 'reels')">📸 인스타 릴스</li>
+            <li class="menu-item" onclick="switchTab(event, 'shorts')">🎬 유튜브 쇼츠</li>
+            <li class="menu-item" onclick="switchTab(event, 'blog')">📝 네이버 블로그</li>
+            <li class="menu-item" onclick="switchTab(event, 'settings')">⚙️ 설정</li>
+        </ul>
+    </div>
+
+    <div class="main-content">
+        
+        <div id="all-auto" class="section active">
+            <div class="page-title">전체 자동화 파이프라인</div>
+            <div class="card">
+                <div class="form-group">
+                    <label>토스 쉐어링크 URL 입력</label>
+                    <input type="text" id="tossUrl" placeholder="https://toss.shopping/_m/..." />
+                </div>
+                <button class="btn-primary" onclick="runPipeline()">대본, 자막 및 원고 자동 생성</button>
+                <div id="pipelineLog" class="output-box">토스 상품 링크를 넣고 실행 버튼을 누르면 인스타, 유튜브, 블로그용 콘텐츠가 한 번에 생성됩니다.</div>
+            </div>
+        </div>
+
+        <div id="item-manage" class="section">
+            <div class="page-title">내 등록 상품 관리</div>
+            
+            <div class="card">
+                <div class="form-group">
+                    <label>토스 앱에서 복사한 상품 쉐어링크 등록</label>
+                    <div class="filter-bar" style="margin-bottom: 0;">
+                        <input type="text" id="manualAddUrl" placeholder="https://toss.shopping/_m/... 링크를 붙여넣으세요" />
+                        <button class="btn-primary" onclick="addCustomItemLink()">➕ 상품 등록하기</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="filter-bar">
+                    <input type="text" id="itemSearchInput" placeholder="등록된 상품명 검색..." onkeyup="filterItems()">
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 180px;">제품명</th>
+                                <th style="width: 280px;">🌟 장점 3가지 (AI 분석)</th>
+                                <th style="width: 180px;">설명 및 메모</th>
+                                <th style="width: 110px;">리워드 링크</th>
+                                <th style="width: 75px;">릴스</th>
+                                <th style="width: 75px;">쇼츠</th>
+                                <th style="width: 75px;">블로그</th>
+                                <th style="width: 65px;">관리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="itemTableBody">
+                            <tr>
+                                <td colspan="8" style="text-align: center; color: var(--text-sub); padding: 30px 0;">
+                                    상단 입력창에 토스 쉐어링크를 넣고 [➕ 상품 등록하기] 버튼을 눌러 상품 목록을 추가해 보세요.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="reels" class="section">
+            <div class="page-title">인스타 릴스 생성기</div>
+            <div class="card">
+                <div class="form-group">
+                    <label>등록된 상품 목록에서 선택</label>
+                    <select id="reelsItemSelect">
+                        <option value="">상품 관리에서 먼저 등록해 주세요</option>
+                    </select>
+                </div>
+                <button class="btn-primary" onclick="generateChannelContent('reels')">릴스용 대본/원고 생성</button>
+                <div id="reelsOutput" class="output-box">등록한 상품을 선택하면 인스타용 숏폼 대본과 가이드가 생성됩니다.</div>
+            </div>
+        </div>
+
+        <div id="shorts" class="section">
+            <div class="page-title">유튜브 쇼츠 생성기</div>
+            <div class="card">
+                <div class="form-group">
+                    <label>등록된 상품 목록에서 선택</label>
+                    <select id="shortsItemSelect">
+                        <option value="">상품 관리에서 먼저 등록해 주세요</option>
+                    </select>
+                </div>
+                <button class="btn-primary" onclick="generateChannelContent('shorts')">쇼츠 전용 대본/원고 생성</button>
+                <div id="shortsOutput" class="output-box">등록한 상품을 선택하면 유튜브 쇼츠용 대본 및 가이드가 생성됩니다.</div>
+            </div>
+        </div>
+
+        <div id="blog" class="section">
+            <div class="page-title">네이버 블로그 포스팅 생성기</div>
+            <div class="card">
+                <div class="form-group">
+                    <label>등록된 상품 목록에서 선택</label>
+                    <select id="blogItemSelect">
+                        <option value="">상품 관리에서 먼저 등록해 주세요</option>
+                    </select>
+                </div>
+                <button class="btn-primary" onclick="generateBlogContent()">상세 리뷰 글 및 대표 이미지 생성</button>
+                <div id="blogOutput" class="output-box">SEO 최적화 블로그 후기 원고와 본문용 대표 이미지가 생성됩니다.</div>
+            </div>
+        </div>
+
+        <div id="settings" class="section">
+            <div class="page-title">환경 설정</div>
+            <div class="card">
+                <div class="form-group">
+                    <label>Render 백엔드 서버 URL</label>
+                    <input type="text" id="serverUrl" value="https://toss-automation-backend.onrender.com" />
+                </div>
+                <div class="form-group">
+                    <label>토스 파트너스 연동 상태</label>
+                    <input type="text" value="회원 연동 ID (Render 환경변수 연동 완료)" disabled />
+                </div>
+                <button class="btn-primary" onclick="alert('설정이 저장되었습니다.')">설정 저장</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // 스크린샷에서 확인된 Firebase 연결 정보 적용
+        const firebaseConfig = {
+            apiKey: "AIzaSyAQbtUED9GFq1HlRLikN9XISGc3N22sTEk",
+            authDomain: "test-88c6c.firebaseapp.com",
+            projectId: "test-88c6c",
+            storageBucket: "test-88c6c.firebasestorage.app",
+            messagingSenderId: "797869946970",
+            appId: "1:797869946970:web:6b72bb24dbb964b89f0063"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const productsCol = collection(db, "toss_products");
+
+        const SERVER_URL = "https://toss-automation-backend.onrender.com";
+        window.fetchedItemsList = [];
+
+        // 실시간 동기화 수신기
+        onSnapshot(productsCol, (snapshot) => {
+            window.fetchedItemsList = snapshot.docs.map(doc => ({
+                docId: doc.id,
+                ...doc.data()
+            }));
+            renderTable();
+            updateChannelDropdowns(window.fetchedItemsList);
+        });
+
+        window.switchTab = function(e, tabId) {
+            document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        };
+
+        window.filterItems = function() {
+            const input = document.getElementById('itemSearchInput').value.toLowerCase();
+            const rows = document.querySelectorAll('#itemTableBody tr');
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                row.style.display = text.includes(input) ? '' : 'none';
+            });
+        };
+
+        function updateChannelDropdowns(items) {
+            const reelsSelect = document.getElementById('reelsItemSelect');
+            const shortsSelect = document.getElementById('shortsItemSelect');
+            const blogSelect = document.getElementById('blogItemSelect');
+
+            if(items.length === 0) {
+                const emptyOpt = '<option value="">상품 관리에서 먼저 등록해 주세요</option>';
+                reelsSelect.innerHTML = emptyOpt;
+                shortsSelect.innerHTML = emptyOpt;
+                blogSelect.innerHTML = emptyOpt;
+                return;
+            }
+
+            let optionsHtml = '';
+            items.forEach(item => {
+                optionsHtml += `<option value="${item.share_link}">${item.name}</option>`;
+            });
+
+            reelsSelect.innerHTML = optionsHtml;
+            shortsSelect.innerHTML = optionsHtml;
+            blogSelect.innerHTML = optionsHtml;
+        }
+
+        window.deleteItem = async function(docId) {
+            if(confirm('해당 상품을 모든 기기 목록에서 삭제하시겠습니까?')) {
+                try {
+                    await deleteDoc(doc(db, "toss_products", docId));
+                    alert('삭제되었습니다.');
+                } catch(e) {
+                    alert('삭제 도중 오류가 발생했습니다.');
+                }
+            }
+        };
+
+        function renderTable() {
+            const tableBody = document.getElementById('itemTableBody');
+            tableBody.innerHTML = '';
+
+            if (window.fetchedItemsList.length === 0) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="8" style="text-align: center; color: var(--text-sub); padding: 30px 0;">
+                            상단 입력창에 토스 쉐어링크를 넣고 [➕ 상품 등록하기] 버튼을 눌러 상품 목록을 추가해 보세요.
+                        </td>
+                    </tr>`;
+                return;
+            }
+
+            window.fetchedItemsList.forEach((item) => {
+                const tr = document.createElement('tr');
+                
+                let featuresHtml = '<ul class="features-list">';
+                if (Array.isArray(item.features)) {
+                    item.features.forEach(f => {
+                        const cleanText = f.replace(/^[\s•\-\*\.]+/g, '').trim();
+                        if(cleanText) featuresHtml += `<li>${cleanText}</li>`;
+                    });
+                } else {
+                    const cleanText = (item.features || '가성비 추천 상품').replace(/^[\s•\-\*\.]+/g, '').trim();
+                    featuresHtml += `<li>${cleanText}</li>`;
+                }
+                featuresHtml += '</ul>';
+
+                tr.innerHTML = `
+                    <td><b>${item.name}</b></td>
+                    <td>${featuresHtml}</td>
+                    <td><div style="max-height: 80px; overflow-y: auto; word-break: keep-all;">${item.usage}</div></td>
+                    <td style="text-align: center;"><a href="${item.share_link}" target="_blank" class="link-text">🔗 열기</a></td>
+                    <td style="text-align: center;"><span class="badge ${item.reels ? 'badge-done' : 'badge-none'}">${item.reels ? '완료' : '미완료'}</span></td>
+                    <td style="text-align: center;"><span class="badge ${item.shorts ? 'badge-done' : 'badge-none'}">${item.shorts ? '완료' : '미완료'}</span></td>
+                    <td style="text-align: center;"><span class="badge ${item.blog ? 'badge-done' : 'badge-none'}">${item.blog ? '완료' : '미완료'}</span></td>
+                    <td style="text-align: center;"><button class="btn-delete" onclick="deleteItem('${item.docId}')">삭제</button></td>
+                `;
+                tableBody.appendChild(tr);
+            });
+        }
+
+        window.addCustomItemLink = async function() {
+            const input = document.getElementById('manualAddUrl');
+            const url = input.value.trim();
+
+            if (!url) {
+                alert('토스 쉐어링크 주소를 입력해주세요.');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${SERVER_URL}/parse-custom-link`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ product_url: url })
+                });
+                const data = await res.json();
+
+                if (data.success && data.item) {
+                    const newItem = {
+                        name: data.item.name,
+                        features: data.item.features,
+                        usage: data.item.usage,
+                        share_link: data.item.share_link,
+                        img_url: data.item.img_url || '',
+                        reels: false,
+                        shorts: false,
+                        blog: false,
+                        createdAt: new Date().toISOString()
+                    };
+
+                    await addDoc(productsCol, newItem);
+                    input.value = '';
+                    alert(`'${data.item.name}' 상품이 모든 기기에 동기화되었습니다!`);
+                } else {
+                    alert(`상품 파싱 실패: ${data.detail || '올바른 토스 쉐어링크인지 확인해 주세요.'}`);
+                }
+            } catch (e) {
+                alert(`서버 통신 오류: ${e.message}`);
+            }
+        };
+
+        window.runPipeline = async function() {
+            const url = document.getElementById('tossUrl').value.trim();
+            const log = document.getElementById('pipelineLog');
+
+            if(!url) { alert('토스 링크를 입력해주세요.'); return; }
+
+            log.innerHTML = "⏳ Gemini AI가 대본 생성 중입니다...";
+
+            try {
+                const res = await fetch(`${SERVER_URL}/run-pipeline`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ product_url: url })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    log.innerHTML = `✅ <b>[전체 파이프라인 생성 완료]</b>\n\n📌 <b>상품명:</b> ${data.product_name}\n\n🔗 <b>리워드 쉐어링크:</b>\n<a href="${data.share_link}" target="_blank" class="link-text">${data.share_link}</a>\n\n🎙️ <b>생성된 AI 숏폼 대본:</b>\n${data.script}`;
+                } else {
+                    log.innerText = `❌ 에러: ${data.detail}`;
+                }
+            } catch(e) {
+                log.innerText = "❌ 서버 통신 오류가 발생했습니다.";
+            }
+        };
+
+        window.generateChannelContent = async function(channel) {
+            const selectId = `${channel}ItemSelect`;
+            const outputId = `${channel}Output`;
+            const selectedUrl = document.getElementById(selectId).value;
+            const log = document.getElementById(outputId);
+
+            if(!selectedUrl) { alert('상품을 먼저 선택해 주세요.'); return; }
+
+            log.innerHTML = `⏳ Gemini AI로 ${channel.toUpperCase()} 전용 원고를 생성 중입니다...`;
+
+            try {
+                const res = await fetch(`${SERVER_URL}/run-pipeline`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ product_url: selectedUrl })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    log.innerHTML = `✅ <b>[${channel.toUpperCase()} 콘텐츠 생성 완료]</b>\n\n📌 <b>상품명:</b> ${data.product_name}\n\n🎙️ <b>AI 나레이션 대본:</b>\n${data.script}`;
+                } else {
+                    log.innerText = `❌ 에러: ${data.detail}`;
+                }
+            } catch(e) {
+                log.innerText = "❌ 원고 생성 도중 오류가 발생했습니다.";
+            }
+        };
+
+        window.generateBlogContent = async function() {
+            const selectedUrl = document.getElementById('blogItemSelect').value;
+            const log = document.getElementById('blogOutput');
+
+            if(!selectedUrl) { alert('상품을 먼저 선택해 주세요.'); return; }
+
+            log.innerText = "⏳ Gemini AI가 네이버 블로그 SEO 최적화 원고를 생성 중입니다...";
+
+            try {
+                const res = await fetch(`${SERVER_URL}/generate-blog`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ product_url: selectedUrl })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    log.innerHTML = `✅ <b>[네이버 블로그 원고 작성 완료]</b>\n\n📌 <b>상품명:</b> ${data.product_name}\n\n🖼️ <b>대표 이미지:</b>\n<img src="${data.image_url}" class="blog-img-preview" />\n<a href="${data.image_url}" target="_blank" class="btn-download" style="background-color: #3182f6;">📷 이미지 다운로드</a>\n\n📝 <b>원고:</b>\n----------------------------------------\n${data.blog_post}\n----------------------------------------\n\n🔗 <b>구매 링크:</b> ${data.share_link}`;
+                } else {
+                    log.innerText = `❌ 에러: ${data.detail}`;
+                }
+            } catch(e) {
+                log.innerText = "❌ 블로그 원고 작성 도중 오류가 발생했습니다.";
+            }
+        };
+    </script>
+</body>
+</html>
